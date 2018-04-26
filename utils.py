@@ -12,6 +12,7 @@ import matplotlib.pyplot as plt
 import matplotlib.image as mpimg
 
 #get all image in the given directory persume that this directory only contain image files
+#读取所有的图像文件，存放在list中返回
 def get_images_by_dir(dirname):
     img_names = os.listdir(dirname)
     img_paths = [dirname+'/'+img_name for img_name in img_names]
@@ -19,45 +20,54 @@ def get_images_by_dir(dirname):
     return imgs
 
 #function take the chess board image and return the object points and image points
-def calibrate(images,grid=(9,6)):
-    object_points=[]
-    img_points = []
+#输入棋盘格图像，得到 棋盘格内角的世界坐标"object points"，对应图片坐标"image point"
+def calibrate(images, grid=(9,6)):
+    object_points=[] #棋盘格内角的世界坐标"object points"
+    img_points = []  #对应图片坐标"image point"
     for img in images:
-        object_point = np.zeros( (grid[0]*grid[1],3),np.float32 )
-        object_point[:,:2]= np.mgrid[0:grid[0],0:grid[1]].T.reshape(-1,2)
-        gray = cv2.cvtColor(img,cv2.COLOR_BGR2GRAY)
+        object_point = np.zeros((grid[0]*grid[1], 3), np.float32)
+        object_point[:, :2] = np.mgrid[0:grid[0], 0:grid[1]].T.reshape(-1, 2)
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        #传入棋盘格的灰度(grayscale)图片和横纵内角点个数就可得到图片内角的"image point"
         ret, corners = cv2.findChessboardCorners(gray, grid, None)
         if ret:
             object_points.append(object_point)
             img_points.append(corners)
-    return object_points,img_points
+    return object_points, img_points
 
 def get_M_Minv():
-    src = np.float32([[(203, 720), (585, 460), (695, 460), (1127, 720)]])
-    dst = np.float32([[(320, 720), (320, 0), (960, 0), (960, 720)]])
-    M = cv2.getPerspectiveTransform(src, dst)
-    Minv = cv2.getPerspectiveTransform(dst,src)
-    return M,Minv
+    src = np.float32([[(203, 720), (585, 460), (695, 460), (1127, 720)]]) #原始坐标点
+    dst = np.float32([[(320, 720), (320, 0), (960, 0), (960, 720)]]) #要变换的坐标点
+    M = cv2.getPerspectiveTransform(src, dst) #从src变换到dst的变换矩阵
+    Minv = cv2.getPerspectiveTransform(dst, src) #逆变换矩阵
+    return M, Minv  #返回变换矩阵和逆变换矩阵
     
 #function takes an image, object points, and image points
 # performs the camera calibration, image distortion correction and 
 # returns the undistorted image
+#输入世界坐标，内角坐标，输出矫正图片
 def cal_undistort(img, objpoints, imgpoints):
     # Use cv2.calibrateCamera() and cv2.undistort()
+    #输入世界坐标和内角坐标，可得到相机校正矩阵mtx和失真系数dist
     ret, mtx, dist, rvecs, tvecs = cv2.calibrateCamera(objpoints, imgpoints, img.shape[1::-1], None, None)
+    #根据相机矫正矩阵和失真系数，然后使用 cv2.undistort()方法就可得到校正图片
     dst = cv2.undistort(img, mtx, dist, None, mtx)
     return dst
 
+
+#sobel水平或者垂直方向进行二值化
 def abs_sobel_thresh(img, orient='x', thresh_min=0, thresh_max=255):
     # Convert to grayscale
     gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
     # Apply x or y gradient with the OpenCV Sobel() function
     # and take the absolute value
+    #使用cv2.Sobel()计算计算x方向或y方向的导数
     if orient == 'x':
         abs_sobel = np.absolute(cv2.Sobel(gray, cv2.CV_64F, 1, 0))
     if orient == 'y':
         abs_sobel = np.absolute(cv2.Sobel(gray, cv2.CV_64F, 0, 1))
     # Rescale back to 8 bit integer
+    ##阈值过滤
     scaled_sobel = np.uint8(255*abs_sobel/np.max(abs_sobel))
     # Create a copy and apply the threshold
     binary_output = np.zeros_like(scaled_sobel)
@@ -67,6 +77,7 @@ def abs_sobel_thresh(img, orient='x', thresh_min=0, thresh_max=255):
     # Return the result
     return binary_output
 
+#sobel在水平和垂直方向的二值化，使用全局的颜色变化梯度来进行阈值过滤
 def mag_thresh(img, sobel_kernel=3, mag_thresh=(0, 255)):
     # Convert to grayscale
     gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
@@ -102,13 +113,13 @@ def dir_threshold(img, sobel_kernel=3, thresh=(0, np.pi/2)):
 
 def hls_select(img,channel='s',thresh=(0, 255)):
     hls = cv2.cvtColor(img, cv2.COLOR_RGB2HLS)
-    if channel=='h':
-        channel = hls[:,:,0]
-    elif channel=='l':
-        channel=hls[:,:,1]
+    if channel == 'h':
+        channel = hls[:, :, 0]
+    elif channel == 'l':
+        channel = hls[:, :, 1]
     else:
-        channel=hls[:,:,2]
-    binary_output = np.zeros_like(channel)
+        channel = hls[:, :, 2]
+    binary_output = np.zeros_like(channel) #复制一个
     binary_output[(channel > thresh[0]) & (channel <= thresh[1])] = 1
     return binary_output
 
@@ -126,6 +137,8 @@ def lab_select(img, thresh=(0, 255)):
     binary_output[(b_channel > thresh[0]) & (b_channel <= thresh[1])] = 1
     return binary_output
 
+
+#使用滑动窗多项式拟合来获取车道边界，这里使用9个200px宽的滑动窗来定位一条车道线像素
 def find_line(binary_warped):
     # Take a histogram of the bottom half of the image
     histogram = np.sum(binary_warped[binary_warped.shape[0]//2:,:], axis=0)
@@ -216,6 +229,8 @@ def find_line_by_previous(binary_warped,left_fit,right_fit):
     right_fit = np.polyfit(righty, rightx, 2)
     return left_fit, right_fit, left_lane_inds, right_lane_inds
 
+
+#使用逆变形矩阵把鸟瞰二进制图检测的车道镶嵌回原图，并高亮车道区域
 def draw_area(undist,binary_warped,Minv,left_fit, right_fit):
     # Generate x and y values for plotting
     ploty = np.linspace(0, binary_warped.shape[0]-1, binary_warped.shape[0] )
@@ -238,6 +253,10 @@ def draw_area(undist,binary_warped,Minv,left_fit, right_fit):
     # Combine the result with the original image
     result = cv2.addWeighted(undist, 1, newwarp, 0.3, 0)
     return result
+
+
+#计算车道曲率及车辆相对车道中心位置
+#利用检测车道得到的拟合值(find_line 返回的left_fit, right_fit)计算车道曲率，及车辆相对车道中心位置
 
 def calculate_curv_and_pos(binary_warped,left_fit, right_fit):
     # Define y-value where we want radius of curvature
@@ -262,23 +281,26 @@ def calculate_curv_and_pos(binary_warped,left_fit, right_fit):
     veh_pos = (((leftx[719] + rightx[719]) * lane_xm_per_pix) / 2.)
     cen_pos = ((binary_warped.shape[1] * lane_xm_per_pix) / 2.)
     distance_from_center = cen_pos - veh_pos
-    return curvature,distance_from_center
+    return curvature, distance_from_center
 
+#只选择黄色区域内的像素值
 def select_yellow(image):
     hsv = cv2.cvtColor(image, cv2.COLOR_RGB2HSV)
-    lower = np.array([20,60,60])
-    upper = np.array([38,174, 250])
+    lower = np.array([20, 60, 60])
+    upper = np.array([38, 174, 250])
     mask = cv2.inRange(hsv, lower, upper)
     
     return mask
 
+#只选择白色区域内的像素值
 def select_white(image):
-    lower = np.array([170,170,170])
-    upper = np.array([255,255,255])
+    lower = np.array([170, 170, 170])
+    upper = np.array([255, 255, 255])
     mask = cv2.inRange(image, lower, upper)
     
     return mask
 
+#使用"cv2.putText()"方法处理原图展示车道曲率及车辆相对车道中心位置信息
 def draw_values(img,curvature,distance_from_center):
     font = cv2.FONT_HERSHEY_SIMPLEX
     radius_text = "Radius of Curvature: %sm"%(round(curvature))

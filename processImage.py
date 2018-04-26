@@ -11,34 +11,37 @@ import utils
 import matplotlib.pyplot as plt
 import numpy as np
 
-cal_imgs = utils.get_images_by_dir('camera_cal')
-object_points,img_points = utils.calibrate(cal_imgs,grid=(9,6))
+cal_imgs = utils.get_images_by_dir('camera_cal') #读取目录中的所有图像，存放在list中返回
+object_points, img_points = utils.calibrate(cal_imgs, grid=(9, 6)) #输入棋盘格图像和大小，输出世界坐标和内角坐标
 
 #test_imgs = utils.get_images_by_dir('test_images')
-test_imgs = utils.get_images_by_dir('new_test')
+test_imgs = utils.get_images_by_dir('new_test') #读取目录中所有图像
 
-undistorted = []
+#输入世界坐标和内角坐标，对测试图像进行矫正
+undistorted = [] #保存矫正后的图像
 for img in test_imgs:
-    img = utils.cal_undistort(img,object_points,img_points)
+    img = utils.cal_undistort(img, object_points, img_points)
     undistorted.append(img)
 
-trans_on_test=[]
+trans_on_test = [] #变形后的图像
 for img in undistorted:
     src = np.float32([[(203, 720), (585, 460), (695, 460), (1127, 720)]])
     dst = np.float32([[(320, 720), (320, 0), (960, 0), (960, 720)]])
-    M = cv2.getPerspectiveTransform(src, dst)
-    trans = cv2.warpPerspective(img, M, img.shape[1::-1], flags=cv2.INTER_LINEAR)
+    M = cv2.getPerspectiveTransform(src, dst) #获取变形矩阵
+    trans = cv2.warpPerspective(img, M, img.shape[1::-1], flags=cv2.INTER_LINEAR) #对图像应用变形矩阵获得变形图片
     trans_on_test.append(trans)
-    
+
+
+#应对多变的路面情况，需要结合多种阈值过滤方法
 thresh = []
 binary_wrapeds = []
 histogram = []
 for img in undistorted:
-    x_thresh = utils.abs_sobel_thresh(img, orient='x', thresh_min=55, thresh_max=100)
-    mag_thresh = utils.mag_thresh(img, sobel_kernel=3, mag_thresh=(70, 255))
+    x_thresh = utils.abs_sobel_thresh(img, orient='x', thresh_min=55, thresh_max=100) #使用x方向梯度进行二值化
+    mag_thresh = utils.mag_thresh(img, sobel_kernel=3, mag_thresh=(70, 255)) #使用x和y方向的梯度进行二值化
     dir_thresh = utils.dir_threshold(img, sobel_kernel=3, thresh=(0.7, 1.3))
-    s_thresh = utils.hls_select(img,channel='s',thresh=(160, 255))
-    s_thresh_2 = utils.hls_select(img,channel='s',thresh=(200, 240))
+    s_thresh = utils.hls_select(img, channel='s',thresh=(160, 255)) #使用hls颜色空间的s通道进行阈值过滤
+    s_thresh_2 = utils.hls_select(img, channel='s',thresh=(200, 240)) #使用hls颜色空间的s通道进行阈值过滤
     
     white_mask = utils.select_white(img)
     yellow_mask = utils.select_yellow(img)
@@ -50,10 +53,11 @@ for img in undistorted:
     
     src = np.float32([[(203, 720), (585, 460), (695, 460), (1127, 720)]])
     dst = np.float32([[(320, 720), (320, 0), (960, 0), (960, 720)]])
-    M = cv2.getPerspectiveTransform(src, dst)
+    M = cv2.getPerspectiveTransform(src, dst) #获取变形矩阵（这个变形可以把阈值过滤后的二进制图片变形为鸟撒视角）
+    #对二进制图像应用变形矩阵，变形后的图像为鸟撒视角
     binary_warped = cv2.warpPerspective(combined, M, img.shape[1::-1], flags=cv2.INTER_LINEAR)
     
-    hist = np.sum(binary_warped[binary_warped.shape[0]//2:,:], axis=0)
+    hist = np.sum(binary_warped[binary_warped.shape[0]//2: , :], axis=0)
     histogram.append(hist)
     
     binary_wrapeds.append(binary_warped)
@@ -61,11 +65,13 @@ for img in undistorted:
     thresh.append(combined)
     
 
-plt.figure(figsize=(20,68))
-i=0
+
+#使用滑动窗多项式拟合来获取车道边界，这里使用9个200px宽的滑动窗来定位一条车道线像素
+plt.figure(figsize=(20, 68))
+i = 0
 for binary_warped in binary_wrapeds:
     # Take a histogram of the bottom half of the image
-    histogram = np.sum(binary_warped[binary_warped.shape[0]//2:,:], axis=0)
+    histogram = np.sum(binary_warped[binary_warped.shape[0]//2:, :], axis=0)
     # Create an output image to draw on and  visualize the result
     out_img = np.dstack((binary_warped, binary_warped, binary_warped))*255
     # Find the peak of the left and right halves of the histogram
@@ -160,34 +166,33 @@ plt.figure(figsize=(20,68))
 for i in range(len(thresh)):
     
     plt.subplot(2*len(thresh),2,2*i+1)
-#    plt.title('before thresholds')
+    plt.title('before thresholds')
     plt.imshow(undistorted[i][:,:,::-1])
     
     plt.subplot(2*len(thresh),2,2*i+2)
-#    plt.title('after thresholds')
+    plt.title('after thresholds')
     plt.imshow(thresh[i],cmap='gray')
-#    
-#plt.figure(figsize=(20,68))
-#for i in range(len(thresh)):
-#    
-#    plt.subplot(2*len(thresh),2,2*i+1)
-#    plt.title('thresholded_wraped image')
-#    plt.imshow(thresh[i],cmap ='gray')
-#    
-#    plt.subplot(2*len(thresh),2,2*i+2)
-#    plt.title('histogram')
-#    plt.plot(histogram[i])
-#    
-#undist = utils.cal_undistort(cal_imgs[0],object_points,img_points)
-#plt.figure(figsize=(20,10))
-#plt.subplot(2,2,1)
-#plt.title('before undistorted')
-#plt.imshow(cal_imgs[0][:,:,::-1])
-#
-#plt.subplot(2,2,2)
-#plt.title('after undistorted')
-#plt.imshow(undist[:,:,::-1])
 
-#test = utils.select_yellow(undistorted[0])
-#plt.imshow(test)
-#print(test.shape)
+plt.figure(figsize=(20,68))
+for i in range(len(thresh)):
+   plt.subplot(2*len(thresh),2,2*i+1)
+   plt.title('thresholded_wraped image')
+   plt.imshow(thresh[i],cmap ='gray')
+
+   plt.subplot(2*len(thresh),2,2*i+2)
+   plt.title('histogram')
+   plt.plot(histogram[i])
+
+undist = utils.cal_undistort(cal_imgs[0],object_points,img_points)
+plt.figure(figsize=(20,10))
+plt.subplot(2,2,1)
+plt.title('before undistorted')
+plt.imshow(cal_imgs[0][:,:,::-1])
+
+plt.subplot(2,2,2)
+plt.title('after undistorted')
+plt.imshow(undist[:,:,::-1])
+
+test = utils.select_yellow(undistorted[0])
+plt.imshow(test)
+print(test.shape)
